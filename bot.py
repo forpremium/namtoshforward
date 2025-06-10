@@ -15,15 +15,12 @@ from aiogram.client.default import DefaultBotProperties
 
 # --- КОНФИГУРАЦИЯ ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMINS: list[int] = [1189419672, 1602393068]
-SOURCE_CHAT_IDS: set[int] = {
-    -1001433669620, # @namangantoshkent24
-    -1001327239978, # @Namangantoshkent26
-    -1001737181397, # @Namangan_toshkent_taksi_29
-}
+ADMINS_RAW = os.getenv("ADMINS", "")
+ADMINS: Set[int] = {int(admin_id.strip()) for admin_id in ADMINS_RAW.split(",") if admin_id.strip()}
+SOURCE_CHATS_RAW = os.getenv("SOURCE_CHATS", "")
+SOURCE_CHAT_IDS: Set[int] = {int(chat_id.strip()) for chat_id in SOURCE_CHATS_RAW.split(",") if chat_id.strip()}
 
-DATA_DIR = Path("data")
-DATA_FILE = DATA_DIR / "data.json"
+DATA_FILE = Path("data.json")
 
 # --- ЛОГИРОВАНИЕ ---
 logging.basicConfig(
@@ -56,7 +53,6 @@ class DataManager:
                 return default_data
             
             loaded_data = json.loads(self.file_path.read_text(encoding="utf-8"))
-            # Обеспечиваем наличие всех ключей для обратной совместимости
             for key in ["recipients", "keywords", "ignored_users"]:
                 if key not in loaded_data:
                     loaded_data[key] = []
@@ -127,18 +123,15 @@ async def cmd_start(message: Message) -> None:
 
 @router.message(F.chat.id.in_(SOURCE_CHAT_IDS), F.text)
 async def relay_message(message: Message, bot: Bot) -> None:
-    # 1. Проверка на игнор-лист. Это первая и главная проверка.
     if message.from_user and message.from_user.id in db.ignored_users:
         log.info("Сообщение от игнорируемого пользователя %d пропущено.", message.from_user.id)
         return
 
-    # 2. Проверка на блок-слова
     txt = (message.text or "").lower()
     if any(kw in txt for kw in db.keywords):
         log.info("Сообщение %d из чата %d пропущено из-за блок-слова.", message.message_id, message.chat.id)
         return
 
-    # 3. Пересылка сообщения всем получателям
     for user_id in db.recipients:
         try:
             await bot.forward_message(
@@ -164,7 +157,7 @@ def build_info_text(message: Message) -> str:
 # --- АДМИН-ПАНЕЛЬ ---
 async def manage_id_list(message: Message, command: str, list_name: str, add_msg: str, remove_msg: str, list_title: str):
     parts = message.text.split(maxsplit=1)
-    action = command.split('_')[0] # 'add' or 'remove' or 'list'
+    action = command.split('_')[0] 
 
     if action == "list":
         item_list = db.data.get(list_name, [])
@@ -183,31 +176,34 @@ async def manage_id_list(message: Message, command: str, list_name: str, add_msg
         if db.remove_item(list_name, uid): await message.reply(f"🗑 {remove_msg}: <code>{uid}</code>")
         else: await message.reply("Бу ID рўйхатда йўқ.")
 
+# --- ИСПРАВЛЕННЫЕ ОБРАБОТЧИКИ ---
+# Добавлен **kwargs для приема лишних аргументов от aiogram
+
 @router.message(Command("add"), F.chat.type == ChatType.PRIVATE)
 @admin_only
-async def cmd_add(message: Message): await manage_id_list(message, "add", "recipients", "Қўшилди", "", "")
+async def cmd_add(message: Message, **kwargs): await manage_id_list(message, "add", "recipients", "Қўшилди", "", "")
 @router.message(Command("remove"), F.chat.type == ChatType.PRIVATE)
 @admin_only
-async def cmd_remove(message: Message): await manage_id_list(message, "remove", "recipients", "", "Ўчирилди", "")
+async def cmd_remove(message: Message, **kwargs): await manage_id_list(message, "remove", "recipients", "", "Ўчирилди", "")
 @router.message(Command("list"), F.chat.type == ChatType.PRIVATE)
 @admin_only
-async def cmd_list(message: Message): await manage_id_list(message, "list", "recipients", "", "", "Жорий қабул қилувчилар рўйхати")
+async def cmd_list(message: Message, **kwargs): await manage_id_list(message, "list", "recipients", "", "", "Жорий қабул қилувчилар рўйхати")
 
 @router.message(Command("add_ignore"), F.chat.type == ChatType.PRIVATE)
 @admin_only
-async def cmd_add_ignore(message: Message): await manage_id_list(message, "add_ignore", "ignored_users", "Пользователь добавлен в игнор-лист", "", "")
+async def cmd_add_ignore(message: Message, **kwargs): await manage_id_list(message, "add_ignore", "ignored_users", "Пользователь добавлен в игнор-лист", "", "")
 @router.message(Command("remove_ignore"), F.chat.type == ChatType.PRIVATE)
 @admin_only
-async def cmd_remove_ignore(message: Message): await manage_id_list(message, "remove_ignore", "ignored_users", "", "Пользователь удален из игнор-листа", "")
+async def cmd_remove_ignore(message: Message, **kwargs): await manage_id_list(message, "remove_ignore", "ignored_users", "", "Пользователь удален из игнор-листа", "")
 @router.message(Command("list_ignored"), F.chat.type == ChatType.PRIVATE)
 @admin_only
-async def cmd_list_ignored(message: Message): await manage_id_list(message, "list", "ignored_users", "", "", "Игнорируемые пользователи")
+async def cmd_list_ignored(message: Message, **kwargs): await manage_id_list(message, "list", "ignored_users", "", "", "Игнорируемые пользователи")
 
 @router.message(Command("add_word", "remove_word", "list_words"), F.chat.type == ChatType.PRIVATE)
 @admin_only
-async def manage_keywords(message: Message):
+async def manage_keywords(message: Message, **kwargs):
     command, *args = message.text.split(maxsplit=1)
-    command = command.lstrip('/') # /add_word -> add_word
+    command = command.lstrip('/')
 
     if command == "list_words":
         if not db.keywords: return await message.reply("Блок-сўзлар рўйхати бўш.")
